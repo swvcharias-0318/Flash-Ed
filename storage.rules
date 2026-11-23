@@ -1,0 +1,33 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.admin == true;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    match /materials/{userId}/{materialId}/{fileName} {
+      allow read: if isAdmin()
+        || (verified() && request.auth.uid == userId)
+        || (verified() && resource.metadata.visibility == 'public');
+      allow create, update: if isAdmin()
+        || (verified()
+          && request.auth.uid == userId
+          && request.resource.size <= 20 * 1024 * 1024
+          && request.resource.metadata.visibility == 'private'
+          && (request.resource.contentType == 'application/pdf'
+            || request.resource.contentType == 'text/plain'));
+      allow delete: if isAdmin()
+        || (verified() && request.auth.uid == userId);
+    }
+  }
+}

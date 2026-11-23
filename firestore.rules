@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.admin == true;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    match /users/{userId} {
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.role == 'student'
+        && request.resource.data.keys().hasOnly([
+          'uid', 'fullName', 'email', 'course', 'yearLevel',
+          'profileImage', 'role', 'createdAt'
+        ]);
+      allow read: if isOwner(userId) || isAdmin();
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role;
+      allow delete: if isAdmin();
+
+      match /bookmarks/{materialId} {
+        allow read: if (isOwner(userId) && verified()) || isAdmin();
+        allow create: if isOwner(userId) && verified()
+          && request.resource.data.materialId == materialId
+          && request.resource.data.keys().hasOnly(['materialId', 'createdAt']);
+        allow delete: if isOwner(userId);
+        allow update: if false;
+      }
+    }
+
+    match /materials/{materialId} {
+      allow read: if isAdmin()
+        || (verified() && resource.data.visibility == 'public')
+        || (verified() && resource.data.uploadedBy == request.auth.uid);
+      allow create: if (isAdmin()
+        || (verified()
+          && request.resource.data.uploadedBy == request.auth.uid
+          && request.resource.data.visibility == 'private'))
+        && request.resource.data.keys().hasOnly([
+          'title', 'description', 'subject', 'fileName', 'fileType',
+          'fileSize', 'fileUrl', 'storagePath', 'uploadedBy',
+          'visibility', 'createdAt'
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.fileType in ['pdf', 'txt']
+        && request.resource.data.fileSize <= 20 * 1024 * 1024;
+      allow update: if isAdmin()
+        || (verified()
+          && resource.data.uploadedBy == request.auth.uid
+          && resource.data.visibility == 'private'
+          && request.resource.data.uploadedBy == resource.data.uploadedBy
+          && request.resource.data.visibility == 'private');
+      allow delete: if isAdmin()
+        || (verified()
+          && resource.data.uploadedBy == request.auth.uid
+          && resource.data.visibility == 'private');
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
